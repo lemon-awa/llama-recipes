@@ -11,15 +11,17 @@ class train_config:
     enable_fsdp: bool=False
     low_cpu_fsdp: bool=False
     run_validation: bool=True
-    batch_size_training: int=4
-    batching_strategy: str="packing" #alternative: padding
+    batch_size_training: int=2
+    batching_strategy: str="padding" #alternative: padding
     context_length: int=4096
     gradient_accumulation_steps: int=1
     gradient_clipping: bool = False
     gradient_clipping_threshold: float = 1.0
-    num_epochs: int=3
+    num_train_epochs: int=3
     max_train_step: int=0
-    max_eval_step: int=0
+    max_eval_step: int=100
+    save_steps: int=100
+    eval_steps: int=100
     num_workers_dataloader: int=1
     lr: float=1e-4
     weight_decay: float=0.0
@@ -28,7 +30,6 @@ class train_config:
     use_fp16: bool=False
     mixed_precision: bool=True
     val_batch_size: int=1
-    dataset = "samsum_dataset"
     peft_method: str = "lora" # None, llama_adapter (Caution: llama_adapter is currently not supported with FSDP)
     use_peft: bool=False
     from_peft_checkpoint: str="" # if not empty and use_peft=True, will load the peft checkpoint and resume the fine-tuning on that checkpoint
@@ -48,3 +49,6 @@ class train_config:
     flop_counter_start: int = 3 # The step to start profiling, default is 3, which means after 3 steps of warmup stage, the profiler will start to count flops.
     use_profiler: bool = False # Enable pytorch profiler, can not be used with flop counter at the same time.
     profiler_dir: str = "PATH/to/save/profiler/results" # will be used if using profiler
+    logging_steps: int = 500
+    num_test: int = 100
+    num_samples: int = 10

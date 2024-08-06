@@ -2,7 +2,13 @@
 # This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
 
 from collections import Counter
+import argparse
+import datetime
+import logging
 import os
+import yaml
+import numpy as np
+import pandas as pd
 
 import dataclasses
 import fire
@@ -22,6 +28,7 @@ from transformers import (
     BitsAndBytesConfig,
     LlamaForCausalLM,
     LlamaConfig,
+    DataCollatorForSeq2Seq,
 )
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
@@ -38,8 +45,7 @@ from llama_recipes.utils.config_utils import (
     generate_dataset_config,
     get_dataloader_kwargs,
 )
-from llama_recipes.utils.dataset_utils import get_preprocessed_dataset
-
+from llama_recipes.utils.dataset_utils import create_dataset,tokenize_llama_dataset
 from llama_recipes.utils.fsdp_utils import hsdp_device_mesh
 from llama_recipes.utils.train_utils import (
     train,
@@ -53,6 +59,8 @@ from llama_recipes.utils.train_utils import (
 from accelerate.utils import is_xpu_available
 from warnings import warn
 
+from llama_recipes.utils.evaluate import Evaluation
+
 def setup_wandb(train_config, fsdp_config, **kwargs):
     try:
         import wandb
@@ -63,17 +71,40 @@ def setup_wandb(train_config, fsdp_config, **kwargs):
         )
     from llama_recipes.configs import wandb_config as WANDB_CONFIG
     wandb_config = WANDB_CONFIG()
-    update_config(wandb_config, **kwargs)
+    update_config(wandb_config, **kwargs["wandb_args"])
     init_dict = dataclasses.asdict(wandb_config)
     run = wandb.init(**init_dict)
     run.config.update(train_config)
     run.config.update(fsdp_config, allow_val_change=True)
     return run
 
-def main(**kwargs):
+def main(config_file: str = None, **kwargs):
     # Update the configuration for the training and sharding process
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", type=str, help="Path to the configuration file.")
+    args = parser.parse_args()
+
+    if config_file:
+        with open(config_file, 'r') as file:
+            config = yaml.safe_load(file)
+        kwargs.update(config)
+    
+    # Set up logging.
+    config_basename_no_ext = os.path.splitext(os.path.basename(args.config))[0]
+    log_dir = f"logs/{config_basename_no_ext}"
+    time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = f"{log_dir}/{time_str}.log"
+    os.makedirs(log_dir, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO, filename=log_file, format="%(asctime)s - %(message)s"
+    )
+    logging.info(f"Configuration: {config}")  # NOTE: logging may expose api keys.
+
     train_config, fsdp_config = TRAIN_CONFIG(), FSDP_CONFIG()
     update_config((train_config, fsdp_config), **kwargs)
+    update_config(train_config, **kwargs["training_args"])
+    print(f"train_config:{train_config}")
+    print(f"fsdp_config:{fsdp_config}")
     # Set the seeds for reproducibility
     if is_xpu_available():
         torch.xpu.manual_seed(train_config.seed)
@@ -196,22 +227,64 @@ def main(**kwargs):
         elif torch.cuda.is_available():
             model.to("cuda")
 
-    dataset_config = generate_dataset_config(train_config, kwargs)
-
-     # Load and preprocess the dataset for training and validation
-    dataset_train = get_preprocessed_dataset(
-        tokenizer,
-        dataset_config,
-        split="train",
+    # Load the dataset.
+    raw_data = pd.read_csv(
+        config["data"]["path"],
+        sep="\t",
+        usecols=[
+            config["data"]["target_col"],
+            config["data"]["time_col"],
+            config["data"]["time_col"],
+        ],
     )
+    raw_data = raw_data.dropna(subset=[config["data"]["target_col"]])
+    targets = raw_data[config["data"]["target_col"]]
+    times = raw_data[config["data"]["time_col"]]
+    logging.info(f"Number of data points: {len(raw_data)}")
+    logging.info(f"Number of valid data points: {len(targets)}")
+
+    # Load precomputed embeddings.
+    npz = np.load(config["embeddings"]["path"])
+    low_dim_embeddings = npz["low_dim_embeddings"]
+
+    ds = create_dataset(
+        texts=targets.to_list(),
+        times=times,
+        low_dim_embeddings=low_dim_embeddings,
+        time_train=config["data"]["time_train"],
+        time_val=config["data"]["time_val"],
+        time_test=config["data"]["time_test"],
+        use_sampler=config["data"]["use_sampler"],
+        sampler_kwargs=config["data"]["sampler_kwargs"],
+        input_kwargs=config["data"]["input_kwargs"],
+    )
+    ds = tokenize_llama_dataset(ds, tokenizer)
+
+    dataset_train = ds['train']
+    dataset_val = ds["validation"]
+    dataset_test = ds["test"]
+    # Evaluation methods
+    evaluate = Evaluation(metric_names=config["metrics"])
+    
+    # print("Sample from dataset_train:")
+    # for i in range(3):
+    #     sample = dataset_train[i]
+    #     for key in sample.keys():
+    #         print(key)
+    #     print(f"input:{sample['input_ids']}")
+    #     print(f"targets:{sample['labels']}")
+
+    # print("Sample from dataset_val:")
+    # for i in range(3):
+    #     sample = dataset_train[i]
+    #     for key in sample.keys():
+    #         print(key)
+    #     print(f"input:{sample['input_ids']}")
+    #     print(f"targets:{sample['labels']}")
+
     if not train_config.enable_fsdp or rank == 0:
         print(f"--> Training Set Length = {len(dataset_train)}")
 
-    dataset_val = get_preprocessed_dataset(
-        tokenizer,
-        dataset_config,
-        split="test",
-    )
     if not train_config.enable_fsdp or rank == 0:
         print(f"--> Validation Set Length = {len(dataset_val)}")
 
@@ -219,14 +292,28 @@ def main(**kwargs):
         dataset_train = ConcatDataset(dataset_train, chunk_size=train_config.context_length)
 
     train_dl_kwargs = get_dataloader_kwargs(train_config, dataset_train, tokenizer, "train")
-
+    # print(f" train_dl_kwargs:{ train_dl_kwargs}")
+    # breakpoint()
     # Create DataLoaders for the training and validation dataset
+    
+    data_collator = DataCollatorForSeq2Seq(tokenizer, padding="max_length")
     train_dataloader = torch.utils.data.DataLoader(
         dataset_train,
         num_workers=train_config.num_workers_dataloader,
         pin_memory=True,
         **train_dl_kwargs,
     )
+    for i, batch in enumerate(train_dataloader):
+        for key in batch.keys():
+            print(key)
+        print(f"Batch {i+1}:")
+        input_ids = batch['input_ids']
+        labels = batch['labels']
+        print(f"input_ids: {input_ids}")
+        print(f"labels: {labels}")
+        if i == 1:
+            break
+
 
     eval_dataloader = None
     if train_config.run_validation:
@@ -241,6 +328,16 @@ def main(**kwargs):
             pin_memory=True,
             **val_dl_kwargs,
         )
+
+        test_dl_kwargs = get_dataloader_kwargs(train_config, dataset_test, tokenizer, "test")
+
+        test_dataloader = torch.utils.data.DataLoader(
+            dataset_test,
+            num_workers=train_config.num_workers_dataloader,
+            pin_memory=True,
+            **test_dl_kwargs,
+        )
+
         if len(eval_dataloader) == 0:
             raise ValueError("The eval set size is too small for dataloader to load even one batch. Please increase the size of eval set.")
         else:
@@ -268,6 +365,7 @@ def main(**kwargs):
         model,
         train_dataloader,
         eval_dataloader,
+        test_dataloader,
         tokenizer,
         optimizer,
         scheduler,
@@ -277,6 +375,7 @@ def main(**kwargs):
         local_rank if train_config.enable_fsdp else None,
         rank if train_config.enable_fsdp else None,
         wandb_run,
+        evaluate,
     )
     if not train_config.enable_fsdp or rank==0:
         [print(f'Key: {k}, Value: {v}') for k, v in results.items()]

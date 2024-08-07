@@ -217,13 +217,14 @@ def train(model, train_dataloader,val_dataloader, test_dataloader, tokenizer, op
                     
                     if total_train_steps % train_config.eval_steps == 0:
                         compute_metrics(model, train_config, test_dataloader, local_rank, tokenizer, wandb_run, evaluate, total_train_steps, type_name ="test")
-                        # compute_metrics(model, train_config, val_dataloader, local_rank, tokenizer, wandb_run, evaluate, total_train_steps, type_name ="eval")
+                        compute_metrics(model, train_config, val_dataloader, local_rank, tokenizer, wandb_run, evaluate, total_train_steps, type_name ="eval")
                         
             
                     if total_train_steps % train_config.logging_steps == 0:
                         log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps)
                         # log(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps)
-
+                        print("end log")
+                        model.train()
                 pbar.close()
 
         epoch_end_time = time.perf_counter()-epoch_start_time
@@ -343,6 +344,7 @@ def compute_metrics(model, train_config, dataloader, local_rank, tokenizer, wand
     print("computing metrics!!")
     if train_config.enable_fsdp:
         world_size = int(os.environ["WORLD_SIZE"])
+        dist.barrier() 
     model.eval()
     eval_preds = []
     eval_targets = []
@@ -406,6 +408,7 @@ def compute_metrics(model, train_config, dataloader, local_rank, tokenizer, wand
     samples_per_second = train_config.num_test / runtime
     steps_per_second = total_eval_steps / runtime
     mean_loss = eval_loss / total_eval_steps
+    dist.barrier() 
     if wandb_run:
         wandb_run.log({
             f"{type_name}/samples_per_second": samples_per_second,
@@ -418,13 +421,15 @@ def compute_metrics(model, train_config, dataloader, local_rank, tokenizer, wand
     if wandb_run:
         wandb_run.log({f"{type_name}/{k}": v for k, v in mean_metrics.items()})
     model.train()
+    dist.barrier() 
 
 def log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps):
     model.eval()
     if train_config.enable_fsdp:
         world_size = int(os.environ["WORLD_SIZE"])
+        dist.barrier()
     dataloader_list = list(test_dataloader)
-    random_subset = random.sample(dataloader_list, min(10, len(dataloader_list)))
+    random_subset = random.sample(dataloader_list, min(5, len(dataloader_list)))
     decoded_preds = []
     decoded_labels = []
 
@@ -446,13 +451,13 @@ def log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, 
         
         # input_ids = batch["examples"].to(batch["input_ids"].device)
         # attention_mask = batch["examples_mask"].to(batch["input_ids"].device)
-        labels = batch["labels"].to(batch["input_ids"].device)
+        labels = batch["labels"].to(batch["input_ids"].device)[0]
         # model.to(batch["input_ids"].device)
 
         with torch.no_grad():
             outputs = model.generate(
                 **new_batch,
-                max_new_tokens=200,
+                max_new_tokens=100,
                 do_sample=True,
                 top_p=1.0,
                 min_length = lens.item()+20,
@@ -462,10 +467,11 @@ def log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, 
                 repetition_penalty=1.0,
                 length_penalty=1.0,
             )
-        output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        output_text = tokenizer.decode(outputs[0][lens.item():], skip_special_tokens=True)
         labels_np = labels.cpu().numpy()
         labels = np.where(labels_np != -100, labels_np, tokenizer.pad_token_id)
-        decoded_label = tokenizer.batch_decode(labels.tolist(), skip_special_tokens=True)
+        # labels_sliced = [labels[lens.item():].tolist()]
+        decoded_label = tokenizer.decode(labels[lens.item():], skip_special_tokens=True)
         print(f"output_text:{output_text}")
         decoded_preds.append(output_text)
         print(f"decoded_label:{decoded_label}")
@@ -481,14 +487,14 @@ def log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, 
     print(f"target_len:{len(decoded_labels)}")
     predictions_df = pd.DataFrame({'predictions': decoded_preds, 'labels': decoded_labels})
     predictions_df["step"] = total_train_steps
-
+    dist.barrier() 
     if wandb_run:
         records_table = wandb.Table(dataframe=predictions_df)
         wandb_run.log({"sample_predictions": records_table})
     else:
         print("wandb_run is None. Skipping the logging step.")
-
     model.train()
+    dist.barrier() 
 
 
 def log(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps):

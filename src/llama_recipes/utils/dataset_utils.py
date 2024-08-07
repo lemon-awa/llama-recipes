@@ -157,7 +157,7 @@ def create_dataset(
                     inputs.append(f"{input} {texts[i]}")
                     examples.append(input)
                 targets.append(f"{input} {texts[i]}")
-            if i == 1000:
+            if i == 10000:
                 break
 
         return datasets.Dataset.from_dict({"text": inputs, "target": targets, "example": examples})

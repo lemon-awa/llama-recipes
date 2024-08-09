@@ -100,12 +100,13 @@ def make_input(
     # Example:
     # Convert the coordinate to text: [1, 2] | [3, 4] reference_text_1 | [1, 4]
     # reference_text_2
-    prompts = [f"{instruction}: {query}"]
+    prompts = []
     if reference_embeddings is not None:
         assert reference_texts is not None
         assert len(reference_embeddings) == len(reference_texts)
         for i in range(len(reference_embeddings)):
             prompts.append(f"{reference_embeddings[i]} {reference_texts[i]}")
+    prompts.append(f"{instruction}: {query}:")
     return split.join(prompts)
 
 

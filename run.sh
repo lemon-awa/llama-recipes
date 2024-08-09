@@ -3,10 +3,10 @@
 #SBATCH --partition=qmei-a100
 #SBATCH --gres=gpu:4
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem-per-gpu=100g
-#SBATCH --time=24:00:00
-#SBATCH --job-name=llama3-70b
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=500g
+#SBATCH --time=48:00:00
+#SBATCH --job-name=llama3-70b-text-generate!
 #SBATCH --output=/scratch/qmei_root/qmei/xziyang/logs/%x-%A-%j.log
 #SBATCH --mail-user=xziyang@umich.edu
 #SBATCH --mail-type=END,FAIL

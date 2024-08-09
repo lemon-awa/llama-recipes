@@ -60,6 +60,7 @@ from accelerate.utils import is_xpu_available
 from warnings import warn
 
 from llama_recipes.utils.evaluate import Evaluation
+os.environ['NCCL_DEBUG'] = 'INFO'
 
 def setup_wandb(train_config, fsdp_config, **kwargs):
     try:
@@ -303,16 +304,16 @@ def main(config_file: str = None, **kwargs):
         pin_memory=True,
         **train_dl_kwargs,
     )
-    for i, batch in enumerate(train_dataloader):
-        for key in batch.keys():
-            print(key)
-        print(f"Batch {i+1}:")
-        input_ids = batch['input_ids']
-        labels = batch['labels']
-        print(f"input_ids: {input_ids}")
-        print(f"labels: {labels}")
-        if i == 1:
-            break
+    # for i, batch in enumerate(train_dataloader):
+    #     for key in batch.keys():
+    #         print(key)
+    #     print(f"Batch {i+1}:")
+    #     input_ids = batch['input_ids']
+    #     labels = batch['labels']
+    #     print(f"input_ids: {input_ids}")
+    #     print(f"labels: {labels}")
+    #     if i == 1:
+    #         break
 
 
     eval_dataloader = None

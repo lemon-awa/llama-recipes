@@ -11,6 +11,7 @@ import contextlib
 import pandas as pd
 import numpy as np
 import random
+import gc
 
 import torch
 import torch.cuda.nccl as nccl
@@ -211,20 +212,36 @@ def train(model, train_dataloader,val_dataloader, test_dataloader, tokenizer, op
                             })
 
                     pbar.set_description(f"Training Epoch: {epoch+1}/{train_config.num_train_epochs}, step {step}/{len(train_dataloader)} completed (loss: {loss.detach().float()})")
-
+                    torch.cuda.empty_cache()
+                    gc.collect()
                     if train_config.save_metrics:
                         save_to_json(metrics_filename, train_step_loss, train_loss, train_step_perplexity, train_prep, val_step_loss, val_loss, val_step_perplexity, val_prep)
                     
                     if total_train_steps % train_config.eval_steps == 0:
+                        model.eval()
                         compute_metrics(model, train_config, test_dataloader, local_rank, tokenizer, wandb_run, evaluate, total_train_steps, type_name ="test")
                         compute_metrics(model, train_config, val_dataloader, local_rank, tokenizer, wandb_run, evaluate, total_train_steps, type_name ="eval")
                         
             
                     if total_train_steps % train_config.logging_steps == 0:
+                        # generate_metrics(model, train_config, val_dataloader, local_rank, tokenizer, wandb_run, total_train_steps)
+                        print("begin log1")
+                        log(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps)
+                        # log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps)
+                        print("end log1")
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                        
+                    if total_train_steps % train_config.generate_steps == 0:
+                        torch.cuda.empty_cache()
+                        gc.collect()
+                        print("begin log2")
                         log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps)
-                        # log(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps)
-                        print("end log")
-                        model.train()
+                        print("end log2")
+                        torch.cuda.empty_cache()
+                        gc.collect()
+
+                    model.train()
                 pbar.close()
 
         epoch_end_time = time.perf_counter()-epoch_start_time
@@ -344,7 +361,6 @@ def compute_metrics(model, train_config, dataloader, local_rank, tokenizer, wand
     print("computing metrics!!")
     if train_config.enable_fsdp:
         world_size = int(os.environ["WORLD_SIZE"])
-        dist.barrier() 
     model.eval()
     eval_preds = []
     eval_targets = []
@@ -408,7 +424,6 @@ def compute_metrics(model, train_config, dataloader, local_rank, tokenizer, wand
     samples_per_second = train_config.num_test / runtime
     steps_per_second = total_eval_steps / runtime
     mean_loss = eval_loss / total_eval_steps
-    dist.barrier() 
     if wandb_run:
         wandb_run.log({
             f"{type_name}/samples_per_second": samples_per_second,
@@ -420,18 +435,22 @@ def compute_metrics(model, train_config, dataloader, local_rank, tokenizer, wand
     mean_metrics = {k: np.mean(v) for k, v in metrics.items()}
     if wandb_run:
         wandb_run.log({f"{type_name}/{k}": v for k, v in mean_metrics.items()})
-    model.train()
-    dist.barrier() 
+    torch.cuda.empty_cache()
+    gc.collect()
 
 def log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps):
     model.eval()
-    if train_config.enable_fsdp:
-        world_size = int(os.environ["WORLD_SIZE"])
-        dist.barrier()
+    print("generating!")
+    print(f"local_rank:{local_rank}")
+    torch.cuda.empty_cache()
+    gc.collect()
+    tokenizer.pad_token_id = tokenizer.eos_token_id
     dataloader_list = list(test_dataloader)
-    random_subset = random.sample(dataloader_list, min(5, len(dataloader_list)))
+    random_subset = random.sample(dataloader_list, min(10, len(dataloader_list)))
     decoded_preds = []
     decoded_labels = []
+    torch.cuda.empty_cache()
+    gc.collect()
 
     for batch in random_subset:
         lens = batch["lens"]
@@ -449,8 +468,6 @@ def log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, 
                 else:
                     new_batch[key] = new_batch[key].to('cuda:0')
         
-        # input_ids = batch["examples"].to(batch["input_ids"].device)
-        # attention_mask = batch["examples_mask"].to(batch["input_ids"].device)
         labels = batch["labels"].to(batch["input_ids"].device)[0]
         # model.to(batch["input_ids"].device)
 
@@ -460,45 +477,49 @@ def log2(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, 
                 max_new_tokens=100,
                 do_sample=True,
                 top_p=1.0,
-                min_length = lens.item()+20,
+                min_length = lens.item()+10,
                 temperature=1.0,
                 use_cache=True,
                 top_k=50,
                 repetition_penalty=1.0,
                 length_penalty=1.0,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id
             )
-        output_text = tokenizer.decode(outputs[0][lens.item():], skip_special_tokens=True)
+        output_text = tokenizer.decode(outputs[0][lens.item():].cpu(), skip_special_tokens=True)
         labels_np = labels.cpu().numpy()
         labels = np.where(labels_np != -100, labels_np, tokenizer.pad_token_id)
         # labels_sliced = [labels[lens.item():].tolist()]
         decoded_label = tokenizer.decode(labels[lens.item():], skip_special_tokens=True)
         print(f"output_text:{output_text}")
-        decoded_preds.append(output_text)
         print(f"decoded_label:{decoded_label}")
+        decoded_preds.append(output_text)
         decoded_labels.append(decoded_label)
-        # targets = []
-        # for i in range(labels.size(0)):
-        #     label = labels[i, lens[i]:].cpu().numpy()
-        #     targets.append(label)
+        torch.cuda.empty_cache()
+        gc.collect()
 
-        # # targets = np.array(targets)
-        # decoded_pred = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
     print(f"pred_len:{len(decoded_preds)}")
     print(f"target_len:{len(decoded_labels)}")
-    predictions_df = pd.DataFrame({'predictions': decoded_preds, 'labels': decoded_labels})
-    predictions_df["step"] = total_train_steps
+    torch.cuda.empty_cache()
+    gc.collect()
     dist.barrier() 
+    predictions_df = pd.DataFrame({'generate_predictions': decoded_preds, 'labels': decoded_labels})
+    predictions_df["step"] = total_train_steps
     if wandb_run:
+        print("wandb log!")
         records_table = wandb.Table(dataframe=predictions_df)
-        wandb_run.log({"sample_predictions": records_table})
+        wandb_run.log({"predictions by generate": records_table})
     else:
         print("wandb_run is None. Skipping the logging step.")
-    model.train()
+    del decoded_preds, decoded_labels, new_batch, outputs, output_text, labels
+    torch.cuda.empty_cache()
+    gc.collect()
     dist.barrier() 
 
 
 def log(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, total_train_steps):
     model.eval()
+    torch.cuda.empty_cache()
     if train_config.enable_fsdp:
         world_size = int(os.environ["WORLD_SIZE"])
     dataloader_list = list(test_dataloader)
@@ -541,21 +562,23 @@ def log(model, tokenizer, train_config, test_dataloader,local_rank, wandb_run, t
         targets = np.where(targets != -100, targets, tokenizer.pad_token_id)
         decoded_label = tokenizer.batch_decode(targets.tolist(), skip_special_tokens=True)
         
-        print(f"decoded_preds:{decoded_preds}")
-        print(f"decoded_label:{decoded_label}")
         decoded_preds.extend(decoded_pred)
         decoded_labels.extend(decoded_label)
+        torch.cuda.empty_cache()
+        gc.collect()
 
     predictions_df = pd.DataFrame({'predictions': decoded_preds, 'labels': decoded_labels})
     predictions_df["step"] = total_train_steps
-
+    print(f"predict:{predictions_df}")
     if wandb_run:
+        print("wandb log!")
         records_table = wandb.Table(dataframe=predictions_df)
-        wandb_run.log({"sample_predictions": records_table})
+        wandb_run.log({"predictions by logits": records_table})
     else:
         print("wandb_run is None. Skipping the logging step.")
+    torch.cuda.empty_cache()
+    gc.collect()
 
-    model.train()
 
 # def evaluation(model, train_config, eval_dataloader, local_rank, tokenizer, wandb_run):
 #     """

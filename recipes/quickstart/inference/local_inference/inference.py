@@ -19,6 +19,7 @@ from transformers import AutoTokenizer
 
 def main(
     model_name,
+    my_prompt: str = None,
     peft_model: str = None,
     quantization: str = None, # Options: 4bit, 8bit
     max_new_tokens=100,  # The maximum numbers of tokens to generate
@@ -32,14 +33,8 @@ def main(
     top_k: int = 50,  # [optional] The number of highest probability vocabulary tokens to keep for top-k-filtering.
     repetition_penalty: float = 1.0,  # The parameter for repetition penalty. 1.0 means no penalty.
     length_penalty: int = 1,  # [optional] Exponential penalty to the length that is used with beam-based generation.
-    enable_azure_content_safety: bool = False,  # Enable safety check with Azure content safety api
-    enable_sensitive_topics: bool = False,  # Enable check for sensitive topics using AuditNLG APIs
-    enable_salesforce_content_safety: bool = True,  # Enable safety check with Salesforce safety flan t5
-    enable_llamaguard_content_safety: bool = False,
     max_padding_length: int = None,  # the max padding length to be used with tokenizer padding the prompts.
     use_fast_kernels: bool = False,  # Enable using SDPA from PyTroch Accelerated Transformers, make use Flash Attention and Xformer memory-efficient kernels
-    share_gradio: bool = False,  # Enable endpoint creation for gradio.live
-    **kwargs,
 ):
     # Set the seeds for reproducibility
     if is_xpu_available():
@@ -48,9 +43,7 @@ def main(
         torch.cuda.manual_seed(seed)
     torch.manual_seed(seed)
 
-    model = load_model(model_name, quantization, use_fast_kernels, **kwargs)
-    if peft_model:
-        model = load_peft_model(model, peft_model)
+    model = load_model(model_name, quantization, use_fast_kernels)
 
     model.eval()
 
@@ -58,44 +51,16 @@ def main(
     tokenizer.pad_token = tokenizer.eos_token
 
     def inference(
-        user_prompt,
+        batch,
         temperature,
         top_p,
         top_k,
         max_new_tokens,
-        **kwargs,
     ):
-        safety_checker = get_safety_checker(
-            enable_azure_content_safety,
-            enable_sensitive_topics,
-            enable_salesforce_content_safety,
-            enable_llamaguard_content_safety,
-        )
-
-        # Safety check of the user prompt
-        safety_results = [check(user_prompt) for check in safety_checker]
-        are_safe = all([r[1] for r in safety_results])
-        if are_safe:
-            print("User prompt deemed safe.")
-            print(f"User prompt:\n{user_prompt}")
-        else:
-            print("User prompt deemed unsafe.")
-            for method, is_safe, report in safety_results:
-                if not is_safe:
-                    print(method)
-                    print(report)
-            print("Skipping the inference as the prompt is not safe.")
-            return  # Exit the program with an error status
-
-        batch = tokenizer(
-            user_prompt,
-            truncation=True,
-            max_length=max_padding_length,
-            return_tensors="pt",
-        )
         if is_xpu_available():
             batch = {k: v.to("xpu") for k, v in batch.items()}
         else:
+            print("hello!!")
             batch = {k: v.to("cuda") for k, v in batch.items()}
 
         start = time.perf_counter()
@@ -111,70 +76,24 @@ def main(
                 top_k=top_k,
                 repetition_penalty=repetition_penalty,
                 length_penalty=length_penalty,
-                **kwargs,
             )
         e2e_inference_time = (time.perf_counter() - start) * 1000
         print(f"the inference time is {e2e_inference_time} ms")
         output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # Safety check of the model output
-        safety_results = [
-            check(output_text, agent_type=AgentType.AGENT, user_prompt=user_prompt)
-            for check in safety_checker
-        ]
-        are_safe = all([r[1] for r in safety_results])
-        if are_safe:
-            print("User input and model output deemed safe.")
-            print(f"Model output:\n{output_text}")
-            return output_text
-        else:
-            print("Model output deemed unsafe.")
-            for method, is_safe, report in safety_results:
-                if not is_safe:
-                    print(method)
-                    print(report)
-            return None
+        print(f"Model output:\n{output_text}")
+        return output_text
 
-    if prompt_file is not None:
-        assert os.path.exists(
-            prompt_file
-        ), f"Provided Prompt file does not exist {prompt_file}"
-        with open(prompt_file, "r") as f:
-            user_prompt = "\n".join(f.readlines())
-        inference(user_prompt, temperature, top_p, top_k, max_new_tokens)
-    elif not sys.stdin.isatty():
-        user_prompt = "\n".join(sys.stdin.readlines())
-        inference(user_prompt, temperature, top_p, top_k, max_new_tokens)
-    else:
-        gr.Interface(
-            fn=inference,
-            inputs=[
-                gr.components.Textbox(
-                    lines=9,
-                    label="User Prompt",
-                    placeholder="none",
-                ),
-                gr.components.Slider(
-                    minimum=0, maximum=1, value=1.0, label="Temperature"
-                ),
-                gr.components.Slider(minimum=0, maximum=1, value=1.0, label="Top p"),
-                gr.components.Slider(
-                    minimum=0, maximum=100, step=1, value=50, label="Top k"
-                ),
-                gr.components.Slider(
-                    minimum=1, maximum=2000, step=1, value=200, label="Max tokens"
-                ),
-            ],
-            outputs=[
-                gr.components.Textbox(
-                    lines=5,
-                    label="Output",
-                )
-            ],
-            title="Meta Llama3 Playground",
-            description="https://github.com/meta-llama/llama-recipes",
-        ).queue().launch(server_name="0.0.0.0", share=share_gradio)
-
-
+    if my_prompt is not None:
+        batch = tokenizer(
+            my_prompt,
+            truncation=True,
+            max_length=max_padding_length,
+            return_tensors="pt",
+        )
+        print(f"batch:{batch}")
+        print(f"key:{batch.keys()}")
+        inference(batch, temperature, top_p, top_k, max_new_tokens)
+    
 if __name__ == "__main__":
-    fire.Fire(main)
+    main(model_name="/scratch/qmei_root/qmei/xziyang/huggingface/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct/snapshots/1d54af340dc8906a2d21146191a9c184c35e47bd",my_prompt="Hello my name is")

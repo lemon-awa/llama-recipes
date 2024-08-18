@@ -1,11 +1,11 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
-
 import os
 import sys
 import time
+import numpy as np
+import pandas as pd
+import gc
 
-import fire
+import json
 import gradio as gr
 
 import torch
@@ -15,7 +15,7 @@ from llama_recipes.inference.model_utils import load_model, load_peft_model
 
 from llama_recipes.inference.safety_utils import AgentType, get_safety_checker
 from transformers import AutoTokenizer
-
+from llama_recipes.utils.evaluate import Evaluation
 
 def main(
     model_name,
@@ -23,7 +23,7 @@ def main(
     peft_model: str = None,
     quantization: str = None, # Options: 4bit, 8bit
     max_new_tokens=100,  # The maximum numbers of tokens to generate
-    prompt_file: str = None,
+    prompt_file: str = "dataset_test.json",
     seed: int = 42,  # seed value for reproducibility
     do_sample: bool = True,  # Whether or not to use sampling ; use greedy decoding otherwise.
     min_length: int = None,  # The minimum length of the sequence to be generated, input prompt + min_new_tokens
@@ -44,7 +44,9 @@ def main(
     torch.manual_seed(seed)
 
     model = load_model(model_name, quantization, use_fast_kernels)
-
+    if peft_model:
+        print("load peft")
+        model = load_peft_model(model, peft_model)
     model.eval()
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -84,16 +86,46 @@ def main(
         print(f"Model output:\n{output_text}")
         return output_text
 
-    if my_prompt is not None:
-        batch = tokenizer(
-            my_prompt,
-            truncation=True,
-            max_length=max_padding_length,
-            return_tensors="pt",
-        )
-        print(f"batch:{batch}")
-        print(f"key:{batch.keys()}")
-        inference(batch, temperature, top_p, top_k, max_new_tokens)
+    preds = []
+    labels = []
+    inputs = []
+    evaluate = Evaluation(metric_names=["bleu", "rouge", "meteor", "cosine"])
+    if prompt_file is not None:
+        df = pd.read_json(prompt_file, lines=True)
+        sampled_df = df.sample(n=30, random_state=42)
+        example_column = sampled_df['example'].tolist()
+        target_column = sampled_df['target'].tolist()
+        for prompt,target in zip(example_column,target_column):
+            lens = len(prompt)
+            inputs.append(prompt)
+            batch = tokenizer(
+                prompt,
+                truncation=True,
+                max_length=max_padding_length,
+                return_tensors="pt",
+            )
+            # print(f"batch:{batch}")
+            # print(f"key:{batch.keys()}")
+            output_text = inference(batch, temperature, top_p, top_k, max_new_tokens)
+            output = output_text[lens:]
+            preds.append(output)
+            labels.append(target)
+            torch.cuda.empty_cache()
+            gc.collect()
+        predictions_df = pd.DataFrame({'input':inputs, 'generate_predictions': preds, 'labels': labels})
+        predictions_df.to_csv('predictions.csv', index=False)
+        predictions_df.to_json('predictions.json', orient='records', lines=True)
+        
+        metrics = evaluate.compute(preds, labels)
+        print(f"metrics:{metrics}")
+        mean_metrics = {k: np.mean(v) for k, v in metrics.items()}
+        print(f"mean_metrics:{mean_metrics}")
+        with open('mean_metrics_1.json', 'w') as json_file:
+            json.dump(mean_metrics, json_file, indent=4)
+        torch.cuda.empty_cache()
+        gc.collect()
     
 if __name__ == "__main__":
-    main(model_name="/scratch/qmei_root/qmei/xziyang/huggingface/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct/snapshots/1d54af340dc8906a2d21146191a9c184c35e47bd",my_prompt="Hello my name is")
+    model_name = "/scratch/qmei_root/qmei/xziyang/huggingface/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct/snapshots/1d54af340dc8906a2d21146191a9c184c35e47bd"
+    peft_model = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref"
+    main(model_name=model_name,peft_model=peft_model,prompt_file="dataset_test.json")

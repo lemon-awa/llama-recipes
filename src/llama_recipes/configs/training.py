@@ -13,15 +13,17 @@ class train_config:
     run_validation: bool=True
     batch_size_training: int=2
     batching_strategy: str="padding" #alternative: padding
-    context_length: int=4096
+    context_length: int=1024
     gradient_accumulation_steps: int=1
     gradient_clipping: bool = False
     gradient_clipping_threshold: float = 1.0
     num_train_epochs: int=3
     max_train_step: int=0
     max_eval_step: int=100
-    save_steps: int=100
+    save_steps: int=10
     eval_steps: int=100
+    num_epochs: int=3
+    dataset = "alpaca_dataset"
     num_workers_dataloader: int=1
     lr: float=1e-4
     weight_decay: float=0.0
@@ -33,13 +35,13 @@ class train_config:
     peft_method: str = "lora" # None, llama_adapter (Caution: llama_adapter is currently not supported with FSDP)
     use_peft: bool=False
     from_peft_checkpoint: str="" # if not empty and use_peft=True, will load the peft checkpoint and resume the fine-tuning on that checkpoint
-    output_dir: str = "PATH/to/save/PEFT/model"
+    output_dir: str = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3-8b-query-and-ref/"
     freeze_layers: bool = False
     num_freeze_layers: int = 1
     quantization: str = None
     one_gpu: bool = False
     save_model: bool = True
-    dist_checkpoint_root_folder: str="PATH/to/save/FSDP/model" # will be used if using FSDP
+    dist_checkpoint_root_folder: str="/scratch/qmei_root/qmei/xziyang/fsdp_model_ckpt" # will be used if using FSDP
     dist_checkpoint_folder: str="fine-tuned" # will be used if using FSDP
     save_optimizer: bool=False # will be used if using FSDP
     use_fast_kernels: bool = True # Enable using SDPA from PyTroch Accelerated Transformers, make use Flash Attention and Xformer memory-efficient kernels
@@ -48,7 +50,7 @@ class train_config:
     flop_counter: bool = False # Enable flop counter to measure model throughput, can not be used with pytorch profiler at the same time.
     flop_counter_start: int = 3 # The step to start profiling, default is 3, which means after 3 steps of warmup stage, the profiler will start to count flops.
     use_profiler: bool = False # Enable pytorch profiler, can not be used with flop counter at the same time.
-    profiler_dir: str = "PATH/to/save/profiler/results" # will be used if using profiler
+    profiler_dir: str = "/scratch/qmei_root/qmei/xziyang/profiler/results" # will be used if using profiler
     logging_steps: int = 1000
     generate_steps: int = 10000
     num_test: int = 100

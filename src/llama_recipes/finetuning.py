@@ -45,7 +45,7 @@ from llama_recipes.utils.config_utils import (
     generate_dataset_config,
     get_dataloader_kwargs,
 )
-from llama_recipes.utils.dataset_utils import create_dataset,tokenize_llama_dataset
+from llama_recipes.utils.dataset_utils import create_dataset,tokenize_llama_dataset, get_preprocessed_dataset
 from llama_recipes.utils.fsdp_utils import hsdp_device_mesh
 from llama_recipes.utils.train_utils import (
     train,
@@ -249,6 +249,7 @@ def main(config_file: str = None, **kwargs):
     low_dim_embeddings = npz["low_dim_embeddings"]
 
     ds = create_dataset(
+        tokenizer,
         texts=targets.to_list(),
         times=times,
         low_dim_embeddings=low_dim_embeddings,
@@ -259,21 +260,32 @@ def main(config_file: str = None, **kwargs):
         sampler_kwargs=config["data"]["sampler_kwargs"],
         input_kwargs=config["data"]["input_kwargs"],
     )
-    ds = tokenize_llama_dataset(ds, tokenizer)
+    # ds = tokenize_llama_dataset(ds, tokenizer)
 
     dataset_train = ds['train']
     dataset_val = ds["validation"]
     dataset_test = ds["test"]
     # Evaluation methods
     evaluate = Evaluation(metric_names=config["metrics"])
-    
+
     # print("Sample from dataset_train:")
     # for i in range(3):
     #     sample = dataset_train[i]
     #     for key in sample.keys():
     #         print(key)
-    #     print(f"input:{sample['input_ids']}")
-    #     print(f"targets:{sample['labels']}")
+    #     input_ids = sample['input_ids']
+    #     print(f"input:{input_ids}")
+    #     print(f"attention_mask:{sample['attention_mask']}")
+    #     labels = sample['labels']
+    #     print(f"targets:{labels}")
+    #     decoded_input = tokenizer.decode(input_ids, skip_special_tokens=True)
+    #     filtered_labels = [label for label in labels if label != -100]
+    #     decoded_labels = tokenizer.decode(filtered_labels, skip_special_tokens=True)
+        
+    #     print(f"input_ids (decoded): {decoded_input}")
+    #     print(f"targets (decoded): {decoded_labels}")
+
+    # breakpoint()
 
     # print("Sample from dataset_val:")
     # for i in range(3):
@@ -293,7 +305,7 @@ def main(config_file: str = None, **kwargs):
         dataset_train = ConcatDataset(dataset_train, chunk_size=train_config.context_length)
 
     train_dl_kwargs = get_dataloader_kwargs(train_config, dataset_train, tokenizer, "train")
-    # print(f" train_dl_kwargs:{ train_dl_kwargs}")
+    print(f" train_dl_kwargs:{ train_dl_kwargs}")
     # breakpoint()
     # Create DataLoaders for the training and validation dataset
     

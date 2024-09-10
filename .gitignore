@@ -5,3 +5,8 @@ wandb/
 artifacts/
 logs/
 data/
+data/
+tmp/
+*.json
+*.csv
+*.sh

@@ -10,10 +10,9 @@ save_model: True
 dist_checkpoint_root_folder: model_checkpoints
 dist_checkpoint_folder: fine-tuned
 fsdp_config.pure_bf16: True
-output_dir: /scratch/qmei_root/qmei/xziyang/model_ckpt
+output_dir: /scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref-2/
 max_eval_step: 100
 dataset: alpaca_dataset
-data_path: llm4explore/model/src/llama_recipes/datasets/alpaca_data.json
 data:
   path: data/massw_llm4explore.tsv
   target_col: key_idea
@@ -30,12 +29,12 @@ embeddings:
   path: data/ada2_key_ideas.npz
 training_args:
   learning_rate: 0.0002
-  output_dir: /scratch/qmei_root/qmei/xziyang/hf_checkpoints/llama3-70b-query-and-ref/lora_8/
+  output_dir: /scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref-2/
   eval_strategy: steps
   per_device_train_batch_size: 1
   per_device_eval_batch_size: 1
   predict_with_generate: True
-  logging_steps: 1000
+  logging_steps: 5000
   save_steps: 10000
   eval_steps: 1000
   warmup_steps: 2000
@@ -43,7 +42,6 @@ training_args:
   num_train_epochs: 3
   report_to: wandb
   generation_max_length: 64
-  run_name: t5-xxl-query-and-ref
   bf16: True
 wandb_args:
   project: idea_generation

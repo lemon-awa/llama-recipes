@@ -4,6 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 import gc
+import fire
 
 import json
 import gradio as gr
@@ -18,8 +19,8 @@ from transformers import AutoTokenizer
 from llama_recipes.utils.evaluate import Evaluation
 
 def main(
-    model_name,
-    my_prompt: str = None,
+    model_name = "/scratch/qmei_root/qmei/xziyang/huggingface/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct/snapshots/1d54af340dc8906a2d21146191a9c184c35e47bd",
+    my_prompt = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref",
     peft_model: str = None,
     quantization: str = None, # Options: 4bit, 8bit
     max_new_tokens=100,  # The maximum numbers of tokens to generate
@@ -89,10 +90,10 @@ def main(
     preds = []
     labels = []
     inputs = []
-    evaluate = Evaluation(metric_names=["bleu", "rouge", "meteor", "cosine"])
+    evaluate = Evaluation(metric_names=["bleu","bertscore", "rouge", "meteor", "cosine","cosine","llmeval"])
     if prompt_file is not None:
         df = pd.read_json(prompt_file, lines=True)
-        sampled_df = df.sample(n=30, random_state=42)
+        sampled_df = df[:200]
         example_column = sampled_df['example'].tolist()
         target_column = sampled_df['target'].tolist()
         for prompt,target in zip(example_column,target_column):
@@ -112,20 +113,36 @@ def main(
             labels.append(target)
             torch.cuda.empty_cache()
             gc.collect()
+            rst = {
+                'input':prompt,
+                'generate_predictions': output,
+                'labels': target,
+            }
+            with open('pre.json', 'a') as f:
+                json_line = json.dumps(rst)
+                f.write(json_line + "\n")
+                
         predictions_df = pd.DataFrame({'input':inputs, 'generate_predictions': preds, 'labels': labels})
-        predictions_df.to_csv('predictions.csv', index=False)
-        predictions_df.to_json('predictions.json', orient='records', lines=True)
+        predictions_df.to_csv('pre.csv', index=False)
+        # predictions_df.to_json('predictions_3.json', orient='records', lines=True)
         
         metrics = evaluate.compute(preds, labels)
         print(f"metrics:{metrics}")
-        mean_metrics = {k: np.mean(v) for k, v in metrics.items()}
+        mean_metrics = {}
+        for k, v in metrics.items():
+            if isinstance(v, list):
+                mean_metrics[k] = np.mean(v)  # 对列表计算均值
+            elif isinstance(v, (int, float)):
+                mean_metrics[k] = v  # 直接使用数值
+            else:
+                print(f"Skipping non-numeric value for key: {k}")
         print(f"mean_metrics:{mean_metrics}")
-        with open('mean_metrics_1.json', 'w') as json_file:
+        with open('met.json', 'w') as json_file:
             json.dump(mean_metrics, json_file, indent=4)
         torch.cuda.empty_cache()
         gc.collect()
     
 if __name__ == "__main__":
     model_name = "/scratch/qmei_root/qmei/xziyang/huggingface/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct/snapshots/1d54af340dc8906a2d21146191a9c184c35e47bd"
-    peft_model = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref"
-    main(model_name=model_name,peft_model=peft_model,prompt_file="dataset_test.json")
+    # peft_model = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref-2"
+    fire.Fire(main(model_name=model_name,prompt_file="dataset_test.json"))

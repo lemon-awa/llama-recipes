@@ -5,8 +5,9 @@ import importlib
 from functools import partial
 from pathlib import Path
 
+import json
 import torch
-
+import copy
 from llama_recipes.dataset import (
     get_grammar_dataset,
     get_alpaca_dataset,
@@ -111,6 +112,7 @@ def make_input(
 
 
 def create_dataset(
+    tokenizer,
     texts: List[str],
     times: List[int],
     low_dim_embeddings: np.ndarray,
@@ -121,6 +123,7 @@ def create_dataset(
     sampler_kwargs: Dict[str, Any] = None,
     input_kwargs: Dict[str, Any] = None,
 ) -> datasets.DatasetDict:
+    IGNORE_INDEX = -100
     times = np.array(times)
     train_mask = (times >= time_train[0]) & (times < time_train[1])
     val_mask = (times >= time_val[0]) & (times < time_val[1])
@@ -135,9 +138,12 @@ def create_dataset(
         input_kwargs = {}
 
     def get_data_split(mask):
-        inputs = []
+        inputs_ids = []
         targets = []
-        examples = []
+        attention_masks = []
+        rst = []
+        # examples = []
+        # rst = []
         for i in range(len(texts)):
             if mask[i]:
                 if sampler is not None:
@@ -151,36 +157,57 @@ def create_dataset(
                             reference_texts=reference_texts,
                             **input_kwargs,
                         )
-                    inputs.append(f"{input} {texts[i]}")
-                    examples.append(input)
                 else:
                     input = make_input(low_dim_embeddings[i], **input_kwargs)
-                    inputs.append(f"{input} {texts[i]}")
-                    examples.append(input)
-                targets.append(f"{input} {texts[i]}")
-
-        return datasets.Dataset.from_dict({"text": inputs, "target": targets, "example": examples})
+                # full_text = f"{input} {texts[i]}"
+                # prompt = torch.tensor(
+                #     tokenizer.encode(input), dtype=torch.int64
+                # )
+                # # examples.append(input)
+                rst.append(texts[i])
+                # example = tokenizer.encode(full_text)
+                # example.append(tokenizer.eos_token_id)
+                # example = torch.tensor(
+                #     example, dtype=torch.int64
+                # )
+                # labels = copy.deepcopy(example)
+                # example_mask = example.ge(0)
+                # example[~example_mask] = 0
+                # labels[: len(prompt)] = IGNORE_INDEX
+                # inputs_ids.append(example)
+                # targets.append(labels)
+                # attention_masks.append(example_mask)
+        return datasets.Dataset.from_dict({
+            # "input_ids": inputs_ids,
+            # "labels": targets,
+            # "attention_mask": attention_masks,
+            "key_idea": rst,
+        })
+        # return datasets.Dataset.from_dict({"text": inputs, "target": targets, "example": examples})
 
     train_dataset = get_data_split(train_mask)
     val_dataset = get_data_split(val_mask)
     test_dataset = get_data_split(test_mask)
 
+    # 将 train_dataset 保存为 JSON 文件
+    train_dataset.to_json("train_dataset.json")
+    breakpoint()
+    
     return datasets.DatasetDict(
         {"train": train_dataset, "validation": val_dataset, "test": test_dataset}
     )
-
 
 def tokenize_llama_dataset(
     ds: datasets.DatasetDict, tokenizer: AutoTokenizer
 ) -> datasets.DatasetDict:
     ds = ds.map(
-        lambda x: tokenizer(x["text"], truncation=False, padding="max_length", max_length=512),
+        lambda x: tokenizer(x["text"], truncation=True,),
         remove_columns=["text"],
         batched=True,
     ).map(
         lambda x: {
             "labels": tokenizer(
-                x["target"], truncation=False, padding="max_length", max_length=512
+                x["target"], truncation=True, 
             )["input_ids"]
         },
         batched=True,
@@ -188,21 +215,21 @@ def tokenize_llama_dataset(
     ).map(
         lambda x: {
             "examples": tokenizer(
-                x["example"], truncation=False, padding="max_length", max_length=512
+                x["example"], truncation=True, 
             )["input_ids"]
         },
         batched=True,
     ).map(
         lambda x: {
             "examples_mask": tokenizer(
-                x["example"], truncation=False, padding="max_length", max_length=512
+                x["example"], truncation=True,
             )["attention_mask"]
         },
         batched=True,
     ).map(
         lambda x: {
             "lens": [len(tokenizer(
-                ex, truncation=False, padding=False,
+                ex, truncation=True, padding=False,
             )["input_ids"]) for ex in x["example"]]
         },
         batched=True,

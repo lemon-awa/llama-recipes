@@ -7,6 +7,7 @@ logs/
 data/
 data/
 tmp/
-*.json
-*.csv
+recipes/quickstart/inference/local_inference/*.json
+recipes/quickstart/inference/local_inference/*.jsonl
+recipes/quickstart/inference/local_inference/*.csv
 *.sh

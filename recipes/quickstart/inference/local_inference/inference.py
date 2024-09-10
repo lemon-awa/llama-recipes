@@ -63,7 +63,6 @@ def main(
         if is_xpu_available():
             batch = {k: v.to("xpu") for k, v in batch.items()}
         else:
-            print("hello!!")
             batch = {k: v.to("cuda") for k, v in batch.items()}
 
         start = time.perf_counter()
@@ -131,9 +130,9 @@ def main(
         mean_metrics = {}
         for k, v in metrics.items():
             if isinstance(v, list):
-                mean_metrics[k] = np.mean(v)  # 对列表计算均值
+                mean_metrics[k] = np.mean(v)  
             elif isinstance(v, (int, float)):
-                mean_metrics[k] = v  # 直接使用数值
+                mean_metrics[k] = v 
             else:
                 print(f"Skipping non-numeric value for key: {k}")
         print(f"mean_metrics:{mean_metrics}")
@@ -144,5 +143,5 @@ def main(
     
 if __name__ == "__main__":
     model_name = "/scratch/qmei_root/qmei/xziyang/huggingface/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct/snapshots/1d54af340dc8906a2d21146191a9c184c35e47bd"
-    # peft_model = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref-2"
-    fire.Fire(main(model_name=model_name,prompt_file="dataset_test.json"))
+    peft_model = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref-2"
+    fire.Fire(main(model_name=model_name,prompt_file="query_and_ref_test_dataset.json"))

@@ -45,7 +45,7 @@ from llama_recipes.utils.config_utils import (
     generate_dataset_config,
     get_dataloader_kwargs,
 )
-from llama_recipes.utils.dataset_utils import create_dataset,tokenize_llama_dataset, get_preprocessed_dataset
+from llama_recipes.utils.dataset_utils import create_dataset
 from llama_recipes.utils.fsdp_utils import hsdp_device_mesh
 from llama_recipes.utils.train_utils import (
     train,
@@ -250,6 +250,7 @@ def main(config_file: str = None, **kwargs):
 
     ds = create_dataset(
         tokenizer,
+        task_type=config["data"]["task_type"],
         texts=targets.to_list(),
         times=times,
         low_dim_embeddings=low_dim_embeddings,

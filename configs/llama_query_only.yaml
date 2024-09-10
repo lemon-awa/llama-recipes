@@ -14,6 +14,7 @@ output_dir: /scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-only-query/
 max_eval_step: 100
 dataset: alpaca_dataset
 data:
+  task_type: query_only
   path: data/massw_llm4explore.tsv
   target_col: key_idea
   time_col: year

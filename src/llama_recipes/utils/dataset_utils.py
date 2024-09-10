@@ -92,6 +92,7 @@ def get_preprocessed_dataset(
 
 def make_input(
     query: np.ndarray,
+    task_type: str="query_and_ref",
     reference_embeddings: np.ndarray = None,
     reference_texts: List[str] = None,
     instruction: str = "Convert the coordinate to text",
@@ -102,17 +103,18 @@ def make_input(
     # Convert the coordinate to text: [1, 2] | [3, 4] reference_text_1 | [1, 4]
     # reference_text_2
     prompts = []
-    if reference_embeddings is not None:
-        assert reference_texts is not None
-        assert len(reference_embeddings) == len(reference_texts)
-        for i in range(len(reference_embeddings)):
-            prompts.append(f"{reference_embeddings[i]} {reference_texts[i]}")
+    if task_type == "query_and_ref":
+        if reference_embeddings is not None:
+            assert reference_texts is not None
+            assert len(reference_embeddings) == len(reference_texts)
+            for i in range(len(reference_embeddings)):
+                prompts.append(f"{reference_embeddings[i]} {reference_texts[i]}")
     prompts.append(f"{instruction}: {query}:")
     return split.join(prompts)
 
-
 def create_dataset(
     tokenizer,
+    task_type: str,
     texts: List[str],
     times: List[int],
     low_dim_embeddings: np.ndarray,
@@ -150,12 +152,13 @@ def create_dataset(
                     reference_texts = [texts[j] for j in indices]
                     input = make_input(
                             low_dim_embeddings[i],
+                            task_type =task_type,
                             reference_embeddings=reference_embeddings,
                             reference_texts=reference_texts,
                             **input_kwargs,
                         )
                 else:
-                    input = make_input(low_dim_embeddings[i], **input_kwargs)
+                    input = make_input(low_dim_embeddings[i],task_type=task_type, **input_kwargs)
                 full_text = f"{input} {texts[i]}"
                 prompt = torch.tensor(
                     tokenizer.encode(input), dtype=torch.int64
@@ -185,43 +188,3 @@ def create_dataset(
     return datasets.DatasetDict(
         {"train": train_dataset, "validation": val_dataset, "test": test_dataset}
     )
-
-def tokenize_llama_dataset(
-    ds: datasets.DatasetDict, tokenizer: AutoTokenizer
-) -> datasets.DatasetDict:
-    ds = ds.map(
-        lambda x: tokenizer(x["text"], truncation=True,),
-        remove_columns=["text"],
-        batched=True,
-    ).map(
-        lambda x: {
-            "labels": tokenizer(
-                x["target"], truncation=True, 
-            )["input_ids"]
-        },
-        batched=True,
-        remove_columns=["target"],
-    ).map(
-        lambda x: {
-            "examples": tokenizer(
-                x["example"], truncation=True, 
-            )["input_ids"]
-        },
-        batched=True,
-    ).map(
-        lambda x: {
-            "examples_mask": tokenizer(
-                x["example"], truncation=True,
-            )["attention_mask"]
-        },
-        batched=True,
-    ).map(
-        lambda x: {
-            "lens": [len(tokenizer(
-                ex, truncation=True, padding=False,
-            )["input_ids"]) for ex in x["example"]]
-        },
-        batched=True,
-        remove_columns=["example"],
-    )
-    return ds

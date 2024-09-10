@@ -144,4 +144,4 @@ def main(
 if __name__ == "__main__":
     model_name = "/scratch/qmei_root/qmei/xziyang/huggingface/hub/models--meta-llama--Meta-Llama-3.1-70B-Instruct/snapshots/1d54af340dc8906a2d21146191a9c184c35e47bd"
     peft_model = "/scratch/qmei_root/qmei/xziyang/model_ckpt/llama3.1-70b-query-and-ref-2"
-    fire.Fire(main(model_name=model_name,prompt_file="query_and_ref_test_dataset.json"))
+    fire.Fire(main(model_name=model_name,prompt_file="query_and_ref_test_dataset.jsonl"))

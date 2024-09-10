@@ -141,9 +141,6 @@ def create_dataset(
         inputs_ids = []
         targets = []
         attention_masks = []
-        rst = []
-        # examples = []
-        # rst = []
         for i in range(len(texts)):
             if mask[i]:
                 if sampler is not None:
@@ -159,40 +156,32 @@ def create_dataset(
                         )
                 else:
                     input = make_input(low_dim_embeddings[i], **input_kwargs)
-                # full_text = f"{input} {texts[i]}"
-                # prompt = torch.tensor(
-                #     tokenizer.encode(input), dtype=torch.int64
-                # )
-                # # examples.append(input)
-                rst.append(texts[i])
-                # example = tokenizer.encode(full_text)
-                # example.append(tokenizer.eos_token_id)
-                # example = torch.tensor(
-                #     example, dtype=torch.int64
-                # )
-                # labels = copy.deepcopy(example)
-                # example_mask = example.ge(0)
-                # example[~example_mask] = 0
-                # labels[: len(prompt)] = IGNORE_INDEX
-                # inputs_ids.append(example)
-                # targets.append(labels)
-                # attention_masks.append(example_mask)
+                full_text = f"{input} {texts[i]}"
+                prompt = torch.tensor(
+                    tokenizer.encode(input), dtype=torch.int64
+                )
+                example = tokenizer.encode(full_text)
+                example.append(tokenizer.eos_token_id)
+                example = torch.tensor(
+                    example, dtype=torch.int64
+                )
+                labels = copy.deepcopy(example)
+                example_mask = example.ge(0)
+                example[~example_mask] = 0
+                labels[: len(prompt)] = IGNORE_INDEX
+                inputs_ids.append(example)
+                targets.append(labels)
+                attention_masks.append(example_mask)
         return datasets.Dataset.from_dict({
-            # "input_ids": inputs_ids,
-            # "labels": targets,
-            # "attention_mask": attention_masks,
-            "key_idea": rst,
+            "input_ids": inputs_ids,
+            "labels": targets,
+            "attention_mask": attention_masks,
         })
-        # return datasets.Dataset.from_dict({"text": inputs, "target": targets, "example": examples})
 
     train_dataset = get_data_split(train_mask)
     val_dataset = get_data_split(val_mask)
     test_dataset = get_data_split(test_mask)
 
-    # 将 train_dataset 保存为 JSON 文件
-    train_dataset.to_json("train_dataset.json")
-    breakpoint()
-    
     return datasets.DatasetDict(
         {"train": train_dataset, "validation": val_dataset, "test": test_dataset}
     )
